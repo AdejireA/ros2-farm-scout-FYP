@@ -8,4 +8,10 @@ install(
   DESTINATION share/${PROJECT_NAME}
 )
 
+install(PROGRAMS
+  scripts/scout_mission.py
+  RENAME scout_mission
+  DESTINATION lib/${PROJECT_NAME}
+)
+
 ament_package()
