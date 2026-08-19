@@ -14,4 +14,10 @@ install(PROGRAMS
   DESTINATION lib/${PROJECT_NAME}
 )
 
+install(PROGRAMS
+  scripts/slam_coverage_drive.py
+  RENAME slam_coverage_drive
+  DESTINATION lib/${PROJECT_NAME}
+)
+
 ament_package()

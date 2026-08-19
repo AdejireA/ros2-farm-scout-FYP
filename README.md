@@ -104,6 +104,19 @@ sudo apt install \
 
 ---
 
+## External dependencies
+
+The maize plant meshes come from the [`virtual_maize_field`](https://github.com/FieldRobotEvent/virtual_maize_field) package. It's **not** part of this repo (gitignored — it's a large third-party asset package, not code we own) and must be cloned alongside it:
+
+```bash
+cd ~/ros2_ws/src
+git clone https://github.com/FieldRobotEvent/virtual_maize_field.git
+```
+
+Without this, Gazebo will fail to load the farm world (`model://maize_01` / `maize_02` not found).
+
+---
+
 ## Build
 
 ```bash

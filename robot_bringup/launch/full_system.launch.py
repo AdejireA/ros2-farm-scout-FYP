@@ -12,11 +12,18 @@ Arguments:
   use_sim_time  (default true)
   use_slam      (default false)   — true=SLAM, false=AMCL+saved map
   map_file      (default '')      — path to map YAML used with AMCL
+  nav2          (default true)    — false=skip the full Nav2 stack (mapping-only
+                                     runs, e.g. slam_coverage_drive.py, which never
+                                     touches Nav2/AMCL — only slam_toolbox comes up)
 
 Quick-start:
   # Terminal 1 — bring everything up (SLAM mode for first run)
   source ~/ros2_ws/install/setup.bash
   ros2 launch robot_bringup full_system.launch.py use_slam:=true
+
+  # Terminal 1, mapping-only variant — skip the unused Nav2 stack while driving
+  # slam_coverage_drive.py (saves significant CPU/RAM; nothing else changes)
+  ros2 launch robot_bringup full_system.launch.py use_slam:=true nav2:=false
 
   # Terminal 2 — switch to autonomous navigation
   ros2 topic pub /mode std_msgs/msg/String "data: 'auto'"
@@ -50,6 +57,7 @@ def generate_launch_description():
     use_sim_time = LaunchConfiguration('use_sim_time', default='true')
     use_slam     = LaunchConfiguration('use_slam',     default='false')
     map_file     = LaunchConfiguration('map_file',     default='')
+    nav2         = LaunchConfiguration('nav2',         default='true')
 
     bringup_share = FindPackageShare('robot_bringup')
 
@@ -76,6 +84,7 @@ def generate_launch_description():
                     'use_sim_time': use_sim_time,
                     'use_slam':     use_slam,
                     'map_file':     map_file,
+                    'nav2':         nav2,
                 }.items(),
             )
         ],
@@ -97,6 +106,8 @@ def generate_launch_description():
         DeclareLaunchArgument('map_file',
                               default_value='/home/adejirea/ros2_ws/src/nav2_config/maps/farm_map.yaml',
                               description='Absolute path to map YAML (AMCL mode)'),
+        DeclareLaunchArgument('nav2', default_value='true',
+                              description='false = skip the full Nav2 stack, slam_toolbox only'),
         simulation,
         arbitration,
         navigation,

@@ -1,12 +1,15 @@
 #!/usr/bin/env python3
 """
-Scout mission — boustrophedon traversal of all 5 row aisles.
+Scout mission — boustrophedon traversal of the 4 inter-row aisles.
 
 The robot visits each aisle in sequence, alternating direction (south→north,
 north→south, ...) so it never doubles back across the field. After the last
 aisle it returns to the spawn point.
 
-Aisle x positions: -8, -4, 0, 4, 8
+Aisle x positions: -6, -2, 2, 6 — gap centerlines between crop rows (rows are
+at -8, -4, 0, 4, 8), not the row positions themselves. Each centerline sits
+2m from its two flanking rows, well within LIDAR range, so both rows stay
+visible without the robot driving through either one's collision geometry.
 Y travel range: -10 to +10  (1 m clear of outermost plants at y = ±9)
 
 Usage (Nav2 must be active and robot localised first):
@@ -20,10 +23,12 @@ from geometry_msgs.msg import PoseStamped
 from nav2_simple_commander.robot_navigator import BasicNavigator, TaskResult
 
 
-AISLES   = [-8.0, -4.0, 0.0, 4.0, 8.0]
+# Gap centerlines between crop rows (2m from each flanking row, within LIDAR
+# range) — NOT the row x-positions themselves (those are -8,-4,0,4,8).
+AISLES   = [-6.0, -2.0, 2.0, 6.0]
 Y_SOUTH  = -10.0
 Y_NORTH  =  10.0
-SPAWN    = (0.0, -11.0)
+SPAWN    = (-9.5, -10.0)
 
 
 def pose(nav: BasicNavigator, x: float, y: float, yaw: float) -> PoseStamped:

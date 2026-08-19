@@ -27,7 +27,7 @@ from rclpy.node import Node
 from geometry_msgs.msg import TwistStamped
 
 # ── Velocity limits ─────────────────────────────────────────────────────────
-MAX_LIN = 0.30   # m/s
+MAX_LIN = 0.50   # m/s
 MAX_ANG = 0.80   # rad/s
 
 # ── Key → (linear_x, angular_z) mapping ─────────────────────────────────────
