@@ -3,3 +3,4 @@ virtual_maize_field/
 **/__pycache__/
 *.pyc
 nav2_config/maps/*.pgm
+PHASE*.md

@@ -101,8 +101,8 @@ from tf2_ros import Buffer, TransformListener
 from tf2_ros import LookupException, ConnectivityException, ExtrapolationException
 
 # ── Tuning ───────────────────────────────────────────────────────────────
-LIN_SPEED = 0.20
-TURN_SPEED = 0.20
+LIN_SPEED = 0.35
+TURN_SPEED = 0.30
 PUBLISH_HZ = 10.0
 CORNER_DWELL = 1.0
 
@@ -127,9 +127,9 @@ Y_SOUTH = -9.5
 Y_NORTH = 9.5
 
 POSITION_TOLERANCE = 0.3   # m, "close enough" to a leg's target
-YAW_TOLERANCE_DEG = 1.0    # deg, "close enough" to a target heading
-LEG_TIMEOUT = 150.0         # s, safety cutoff per leg — if hit, something's wrong
-TURN_TIMEOUT = 30.0        # s, safety cutoff per turn
+YAW_TOLERANCE_DEG = 3.0    # deg, "close enough" to a target heading
+LEG_TIMEOUT = 75.0         # s, safety cutoff per leg — if hit, something's wrong
+TURN_TIMEOUT = 15.0        # s, safety cutoff per turn
 
 # Real planned-path total, computed from the same known geometry (see
 # stage_perimeter/stage_aisles below): perimeter ~77m + aisles ~92m = ~169m.
@@ -160,22 +160,6 @@ class SlamCoverageDriver(Node):
         self._tf_listener = TransformListener(self._tf_buffer, self)
         for _ in range(20):
             rclpy.spin_once(self, timeout_sec=0.1)
-        # Wait for SLAM to publish the map frame before proceeding.
-        self.get_logger().info('[coverage] Waiting for map frame from SLAM...')
-        for i in range(60):  # up to ~30 seconds
-            rclpy.spin_once(self, timeout_sec=0.5)
-            try:
-                self._tf_buffer.lookup_transform(
-                    'map', 'base_link', rclpy.time.Time())
-                self.get_logger().info(
-                    f'[coverage] map frame available after ~{(i+1)*0.5:.1f}s')
-                break
-            except Exception:
-                pass
-        else:
-            self.get_logger().error(
-                '[coverage] map frame not available after 30s -- is SLAM running?')
-            raise RuntimeError('No map frame')
 
         # Planned-pose bookkeeping, seeded from the known real spawn — this
         # is what turn/drive amounts get computed from, NOT live TF (which
@@ -272,7 +256,7 @@ class SlamCoverageDriver(Node):
         end_time = time.time() + dwell
         while time.time() < end_time and rclpy.ok():
             self._publish(0.0, 0.0)
-            rclpy.spin_once(self, timeout_sec=self._period)
+            time.sleep(self._period)
 
     def turn_relative(self, delta_deg, label=''):
         """Turns by delta_deg relative to the LIVE yaw at call time (not an
@@ -292,43 +276,20 @@ class SlamCoverageDriver(Node):
         while rclpy.ok() and time.time() < end_time:
             pose = self.get_pose()
             if pose is None:
-                rclpy.spin_once(self, timeout_sec=self._period)
+                time.sleep(self._period)
                 continue
             self._accumulate(pose)
             diff = normalize_deg(target_yaw - pose[2])
             if abs(diff) <= YAW_TOLERANCE_DEG:
                 break
-            # Proportional braking: slow down as we approach target
-            scale = min(1.0, abs(diff) / 20.0)  # ramp down within 20 deg
-            speed = max(0.08, TURN_SPEED * scale)  # floor at 0.08 rad/s
-            ang = speed if diff > 0 else -speed
+            ang = TURN_SPEED if diff > 0 else -TURN_SPEED
             self._publish(0.0, ang)
-            rclpy.spin_once(self, timeout_sec=self._period)
+            time.sleep(self._period)
         else:
             self.get_logger().warn(
                 f'[coverage] turn_relative {delta_deg:+.0f} {label}: TIMED OUT before '
                 f'reaching target heading — check for a stuck wheel or bad TF.')
         self._stop(dwell=CORNER_DWELL)
-        # Post-turn fine correction: verify and fix yaw
-        for _ in range(60):  # up to 6 more seconds
-            pose = self.get_pose()
-            if pose is None:
-                rclpy.spin_once(self, timeout_sec=self._period)
-                continue
-            diff = normalize_deg(target_yaw - pose[2])
-            if abs(diff) <= YAW_TOLERANCE_DEG:
-                break
-            speed = max(0.05, min(0.15, abs(diff) * 0.03))
-            ang = speed if diff > 0 else -speed
-            self._publish(0.0, ang)
-            rclpy.spin_once(self, timeout_sec=self._period)
-        self._stop(dwell=0.5)
-        final_pose = self.get_pose()
-        if final_pose:
-            final_diff = normalize_deg(target_yaw - final_pose[2])
-            self.get_logger().info(
-                f"[coverage] turn complete: yaw={final_pose[2]:.1f} "
-                f"(target {target_yaw:.1f}, error {final_diff:.1f} deg)")
         return True
 
     def drive_relative(self, distance_m, label=''):
@@ -344,20 +305,15 @@ class SlamCoverageDriver(Node):
             self.get_logger().error(f'[coverage] drive_relative {label}: no pose, aborting leg.')
             return False
         x0, y0 = pose[0], pose[1]
-        start_yaw = pose[2]
         self.get_logger().info(
             f'[coverage] drive_relative {distance_m:.1f}m {label} '
             f'(starting at {x0:.2f}, {y0:.2f})')
         end_time = time.time() + LEG_TIMEOUT
         reached = False
-        stall_ref = (x0, y0)
-        stall_time = time.time()
-        STALL_THRESHOLD = 0.05  # m — less than this in 5s means stuck
-        STALL_PATIENCE = 5.0    # s
         while rclpy.ok() and time.time() < end_time:
             pose = self.get_pose()
             if pose is None:
-                rclpy.spin_once(self, timeout_sec=self._period)
+                time.sleep(self._period)
                 continue
             self._accumulate(pose)
             if self._jump_flagged:
@@ -366,28 +322,8 @@ class SlamCoverageDriver(Node):
             reached = traveled >= distance_m - POSITION_TOLERANCE
             if reached:
                 break
-            # Stall detection: if robot hasn't moved meaningfully in
-            # STALL_PATIENCE seconds, it is stuck (e.g. against a wall).
-            since_stall_ref = math.hypot(pose[0] - stall_ref[0],
-                                         pose[1] - stall_ref[1])
-            if since_stall_ref > STALL_THRESHOLD:
-                stall_ref = (pose[0], pose[1])
-                stall_time = time.time()
-            elif time.time() - stall_time > STALL_PATIENCE:
-                self.get_logger().warn(
-                    f"[coverage] drive_relative {distance_m:.1f}m {label}: "
-                    f"robot stalled at {traveled:.1f}m / {distance_m:.1f}m — "
-                    f"likely hit an obstacle. Accepting leg as done.")
-                reached = True
-                break
-            # Hold heading: correct drift during straight driving
-            heading_err = normalize_deg(start_yaw - pose[2])
-            ang_correct = 0.0
-            if abs(heading_err) > 1.0:  # dead band: ignore < 1 deg
-                ang_correct = heading_err * 0.15  # P-controller
-                ang_correct = max(-0.3, min(0.3, ang_correct))  # clamp
-            self._publish(LIN_SPEED, ang_correct)
-            rclpy.spin_once(self, timeout_sec=self._period)
+            self._publish(LIN_SPEED, 0.0)
+            time.sleep(self._period)
         self._stop()
         if self._jump_flagged:
             return False

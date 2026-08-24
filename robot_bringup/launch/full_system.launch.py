@@ -104,7 +104,7 @@ def generate_launch_description():
         DeclareLaunchArgument('use_slam',     default_value='false',
                               description='true=SLAM Toolbox, false=AMCL+map'),
         DeclareLaunchArgument('map_file',
-                              default_value='/home/adejirea/ros2_ws/src/nav2_config/maps/farm_map.yaml',
+                              default_value='/home/ssrlserg1/ros2_ws/src/nav2_config/maps/farm_map.yaml',
                               description='Absolute path to map YAML (AMCL mode)'),
         DeclareLaunchArgument('nav2', default_value='true',
                               description='false = skip the full Nav2 stack, slam_toolbox only'),
