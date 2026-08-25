@@ -63,17 +63,25 @@ With `--log <name>`, per-waypoint results (status, duration, mode switches) are 
 
 ## Map & Localisation
 
-There is no code in this repository that generates a map from the world's known SDF geometry. The map used for navigation (`farm_map.yaml` / `farm_map.pgm`) is an ordinary saved SLAM Toolbox map: drive the robot in `use_slam:=true` mode, then save it with `nav2_map_server`'s `map_saver_cli`.
+`robot_bringup/scripts/generate_farm_map.py` builds the navigation map directly from `farm.sdf`'s known geometry — the boundary walls, all 5 crop rows (10 plants each), and the 3 named obstacles — without running SLAM at all:
 
-Rather than re-localising against that map with AMCL, `navigation.launch.py` publishes a single **static** `map → odom` transform (via `tf2_ros static_transform_publisher`) instead. This works because the SLAM session that produced the map was started with the robot at the known spawn pose — the static transform is fixed to that exact pose (map (-9.5, -10), yaw 90°, corresponding to odom's origin at (0, 0), yaw 0°). Any run that doesn't start from spawn breaks this alignment.
+```bash
+python3 robot_bringup/scripts/generate_farm_map.py
+```
 
-**The map file is not part of this repository.** `navigation.launch.py`'s `map_file` argument defaults to an absolute path outside the repo (`~/ros2_ws/src/nav2_config/maps/farm_map.yaml`, a plain directory alongside `src/`, not a colcon package), and this repo's own `nav2_config/maps/` directory is tracked empty. Because git does not track empty directories, **a fresh clone's `nav2_config/maps/` won't exist at all, and `colcon build` will fail** on `nav2_config` with a `file INSTALL cannot find ... maps` error until you create it:
+This writes `farm_map.pgm`/`farm_map.yaml` to `~/ros2_ws/src/nav2_config/maps/` by default (matching `navigation.launch.py`'s `map_file` default exactly), or to a directory passed as its one argument. It requires `numpy` and `Pillow` (neither is declared in `robot_bringup/package.xml`), and it is not installed by `robot_bringup/CMakeLists.txt`, so it's run directly with `python3`, not via `ros2 run`.
+
+As a secondary option, a map can still be produced the conventional way instead — drive the robot in `use_slam:=true` mode, then save it with `nav2_map_server`'s `map_saver_cli`. This repository's manual SLAM-driving sessions during development ran into scan-match drift, a discrete `map→odom` pose-graph jump, and incomplete edge coverage (see Known Limitations), which is why the geometry-based generator above is the primary, recommended path.
+
+Whichever way the map is produced, `navigation.launch.py` localises against it with a single **static** `map → odom` transform (via `tf2_ros static_transform_publisher`) rather than AMCL. This is fixed to the known spawn pose (map (-9.5, -10), yaw 90°, corresponding to odom's origin at (0, 0), yaw 0°) — it assumes the map's frame origin coincides with that pose, which holds both for `generate_farm_map.py`'s world-aligned grid and for a SLAM session started at spawn. Any run that doesn't start from spawn breaks this alignment.
+
+**The map file is still not part of this repository's git history.** `navigation.launch.py`'s `map_file` argument defaults to an absolute path outside the repo (`~/ros2_ws/src/nav2_config/maps/farm_map.yaml`, a plain directory alongside `src/`, not a colcon package), and this repo's own `nav2_config/maps/` directory is tracked empty. Because git does not track empty directories, **a fresh clone's `nav2_config/maps/` won't exist at all, and `colcon build` will fail** on `nav2_config` with a `file INSTALL cannot find ... maps` error until you create it:
 
 ```bash
 mkdir -p ~/ros2_ws/src/ros2-farm-scout-FYP/nav2_config/maps
 ```
 
-To actually navigate, you additionally need a real map at the `map_file` path (or pass your own via `map_file:=...`) — either generate one yourself via the SLAM+`map_saver_cli` steps above, or copy one in.
+Running `generate_farm_map.py` with its default output directory does not fix this on its own — it writes to the external `~/ros2_ws/src/nav2_config/maps/` path (the one `map_file` actually points to), not the repo's own package directory. In short, on a fresh clone: run the `mkdir` above so `colcon build` succeeds, then run `generate_farm_map.py` with no arguments so the map Nav2 will actually load exists.
 
 ## Mode Arbitration
 
@@ -174,12 +182,12 @@ Run in a real terminal — keyboard capture does not work in IDE output panes.
 
 ## Known Limitations
 
-- **SLAM mapping has had reliability issues:** manual SLAM-driving sessions during development hit scan-match drift, a discrete `map→odom` pose-graph jump, and incomplete edge coverage. The saved-map + static-transform approach above sidesteps live SLAM/AMCL localisation for navigation entirely; it does not fix those underlying SLAM issues.
+- **SLAM mapping has had reliability issues:** manual SLAM-driving sessions during development hit scan-match drift, a discrete `map→odom` pose-graph jump, and incomplete edge coverage — this is why `generate_farm_map.py` (geometry-based, no SLAM) is the primary way to produce the map, with SLAM+`map_saver_cli` kept only as a secondary option. Either way, navigation itself uses a static `map→odom` transform, not live SLAM/AMCL localisation.
 - **Odometry drift:** without AMCL correction, odometry accumulates error over long missions. Shorter waypoint segments (as used in `scout_mission.py`) mitigate this.
 - **Static localisation assumes spawn:** the static `map→odom` transform is fixed to one specific pose. Missions must begin from spawn (-9.5, -10.0) facing north.
 - **Mode switching is manual:** switching is triggered by publishing to `/mode`, not by automatic failure detection.
 - **No dead-man timeout in MANUAL mode:** the 0.5 s AUTO-mode timeout has no MANUAL-mode equivalent — `arbitration_node` re-publishes the last `/cmd_vel_teleop` message indefinitely if nothing new arrives. `keyboard_teleop.py` protects against this itself (a 0.4 s local key-timeout that zeroes velocity), but any other publisher to `/cmd_vel_teleop` (e.g. a one-shot `ros2 topic pub`) must send its own explicit stop command.
-- **The navigation map is not part of this repository** — see [Map & Localisation](#map--localisation). A fresh clone needs `nav2_config/maps/` created and a real map supplied before `full_system.launch.py`'s default configuration will build and navigate.
+- **The navigation map is not part of this repository** — see [Map & Localisation](#map--localisation). A fresh clone needs `nav2_config/maps/` created (`mkdir`) and `generate_farm_map.py` run (or a map copied in) before `full_system.launch.py`'s default configuration will build and navigate.
 - **`robot_description` package:** contains a custom agricultural robot URDF that is not used in the current simulation (TurtleBot3 Waffle is used instead). Retained for potential future integration.
 
 ## License
