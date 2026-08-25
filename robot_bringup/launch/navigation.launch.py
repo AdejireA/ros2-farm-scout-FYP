@@ -205,19 +205,23 @@ def launch_setup(context, *args, **kwargs):
                 parameters=map_params,
             )
         )
+        # Static map->odom transform (replaces AMCL for simulation).
+        # Spawn at map (-9.5, -10.0) yaw=90deg, odom starts at (0,0,0) yaw=0.
         nav2_nodes.append(
-            LifecycleNode(
-                package='nav2_amcl',
-                executable='amcl',
-                name='amcl',
+            Node(
+                package='tf2_ros',
+                executable='static_transform_publisher',
+                name='map_to_odom',
                 namespace='',
                 output='screen',
-                parameters=common,
+                arguments=['--x', '-9.5', '--y', '-10.0', '--z', '0',
+                           '--roll', '0', '--pitch', '0', '--yaw', '1.5708',
+                           '--frame-id', 'map', '--child-frame-id', 'odom'],
+                parameters=[{'use_sim_time': use_sim_time}],
             )
         )
         managed = [
             'map_server',
-            'amcl',
             'controller_server',
             'smoother_server',
             'planner_server',
