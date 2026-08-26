@@ -4,14 +4,14 @@ Full system launch — bring up the complete agricultural field scouting robot.
 Starts:
   1. Gazebo Harmonic farm world
   2. robot_state_publisher + ROS↔Gz bridge
-  3. Nav2 stack (SLAM or AMCL mode)
+  3. Nav2 stack (SLAM or saved-map + static-transform mode)
   4. Mode-arbitration node  (routes /cmd_vel_auto or /cmd_vel_teleop → /cmd_vel)
   5. Keyboard teleoperation node
 
 Arguments:
   use_sim_time  (default true)
-  use_slam      (default false)   — true=SLAM, false=AMCL+saved map
-  map_file      (default '')      — path to map YAML used with AMCL
+  use_slam      (default false)   — true=SLAM, false=saved map + static map->odom transform
+  map_file      (default '')      — path to map YAML used with the static-transform localisation
   nav2          (default true)    — false=skip the full Nav2 stack (mapping-only
                                      runs, e.g. slam_coverage_drive.py, which never
                                      touches Nav2/AMCL — only slam_toolbox comes up)

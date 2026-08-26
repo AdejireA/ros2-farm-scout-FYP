@@ -3,7 +3,8 @@
 #
 # Two localisation modes are provided (selected in navigation.launch.py):
 #   use_slam:=true  — online SLAM with slam_toolbox (no prior map needed)
-#   use_slam:=false — AMCL localisation against a saved map (default)
+#   use_slam:=false — a saved map + a static map->odom transform fixed to the
+#                      known spawn pose (default) — not AMCL, see navigation.launch.py
 #
 # Nav2 output (controller → velocity_smoother) is remapped in the launch file
 # from /cmd_vel → /cmd_vel_auto so the arbitration node can route it.
