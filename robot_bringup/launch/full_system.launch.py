@@ -11,7 +11,7 @@ Starts:
 Arguments:
   use_sim_time  (default true)
   use_slam      (default false)   — true=SLAM, false=saved map + static map->odom transform
-  map_file      (default '')      — path to map YAML used with the static-transform localisation
+  map_file      (default ~/ros2_ws/src/nav2_config/maps/farm_map.yaml) — path to map YAML used with the static-transform localisation
   nav2          (default true)    — false=skip the full Nav2 stack (mapping-only
                                      runs, e.g. slam_coverage_drive.py, which never
                                      touches Nav2/AMCL — only slam_toolbox comes up)
@@ -102,10 +102,10 @@ def generate_launch_description():
     return LaunchDescription([
         DeclareLaunchArgument('use_sim_time', default_value='true'),
         DeclareLaunchArgument('use_slam',     default_value='false',
-                              description='true=SLAM Toolbox, false=AMCL+map'),
+                              description='true=SLAM Toolbox, false=static transform localization + map'),
         DeclareLaunchArgument('map_file',
                               default_value='/home/ssrlserg1/ros2_ws/src/nav2_config/maps/farm_map.yaml',
-                              description='Absolute path to map YAML (AMCL mode)'),
+                              description='Absolute path to map YAML (static transform localization mode)'),
         DeclareLaunchArgument('nav2', default_value='true',
                               description='false = skip the full Nav2 stack, slam_toolbox only'),
         simulation,

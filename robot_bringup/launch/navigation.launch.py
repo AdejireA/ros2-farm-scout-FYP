@@ -1,12 +1,12 @@
 """
-Navigation launch — Nav2 stack with AMCL or SLAM Toolbox.
+Navigation launch — Nav2 stack with static map->odom transform or SLAM Toolbox.
 
 Arguments:
-  use_slam   (default false) — true = online SLAM, false = AMCL + saved map
+  use_slam   (default false) — true = online SLAM, false = static map->odom transform + saved map
   map_file   (default '')    — absolute path to map YAML (only used when use_slam=false)
   use_sim_time (default true)
   nav2       (default true)  — false = skip the full Nav2 stack (controller/planner/
-                                bt_navigator/behavior/waypoint_follower/smoother/AMCL)
+                                bt_navigator/behavior/waypoint_follower/smoother/static map->odom transform)
                                 entirely; only slam_toolbox (if use_slam=true) is brought
                                 up, under its own minimal lifecycle manager. For mapping-
                                 only runs (e.g. slam_coverage_drive.py, which drives via
@@ -52,7 +52,7 @@ def launch_setup(context, *args, **kwargs):
     if not nav2_enabled:
         # Mapping-only path: skip the full Nav2 stack entirely (not used by
         # slam_coverage_drive.py, which drives via direct /cmd_vel_teleop and
-        # never touches Nav2/AMCL) — only slam_toolbox goes up, if requested,
+        # never touches Nav2/static map->odom transform) — only slam_toolbox goes up, if requested,
         # under its own minimal lifecycle manager so it still reaches ACTIVE.
         light_nodes = []
         if use_slam:
@@ -167,7 +167,7 @@ def launch_setup(context, *args, **kwargs):
         )
     )
 
-    # ── Localisation: AMCL + map_server OR slam_toolbox ──────────────────────
+    # ── Localisation: static map->odom transform + map_server OR slam_toolbox ──
     if use_slam:
         nav2_nodes.append(
             LifecycleNode(
