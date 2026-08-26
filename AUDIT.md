@@ -1,170 +1,235 @@
-# Farm Scout Audit — Where the Project Actually Stands
+# Repository Audit
 
-*A full read-through of every package, launch file, config, and script in `ros2-farm-scout-FYP` — checked against what's actually installed and what `PROJECT_STATUS.md` says, not assumed from the README.*
+Full pass over every tracked file in this repository, checked against the questions
+below. Nothing was changed — this document is the only output. All findings were
+verified directly (reading the file, or in a few cases running a read-only command
+against a copy of the file/tree) rather than assumed; where a command was run, the
+command and result are given inline.
 
-**Scope:** this git repository only. A separate thesis/report document, if one exists outside it, was not reviewed.
-
----
-
-## 01 · The short version
-
-The engineering is genuinely competent — a real dual-mode control architecture, a carefully tuned Nav2 stack, and three separately diagnosed SLAM failure modes with actual root causes, not guesses. What's causing the "losing my way" feeling isn't the code quality. It's that **Phase 0 is the only phase fully closed out**, and Phases 1 through 11 — including the entire 50-trial experiment and every report chapter — are still ahead. That gap is worth seeing clearly rather than feeling vaguely.
-
-> **🚩 Flag — presentation date.** `PROJECT_STATUS.md` records the presentation — live demo plus results and graphs, to your supervisor — as **August 19, 2026**. Today's date is also August 19, 2026. Confirm with your supervisor whether that date is still current before doing anything else in this list — it changes which of the two paths in [§08](#08--recommended-next-steps) actually applies.
-
-Two structural questions have sat open since at least Phase 5 was written and are worth resolving early, because they touch the README, the report, and any live demo: which robot is actually "the" project robot ([finding](#robot-model)), and whether the auto-switching behaviour described in the methodology needs to be built or the methodology needs to be rewritten to match what's actually implemented ([finding](#auto-trigger)).
-
-**Quick numbers:** 6 packages · 1 of 12 phases done · 0 automated tests · 2 blocking issues.
+Classification used throughout: **bug** (code/config does something other than what
+it's supposed to, or silently does nothing), **stale comment** (text that no longer
+matches the code beside it), **missing dependency** (something imported/launched that
+isn't declared anywhere a fresh install would pick it up), **dead code/config** (present
+in the file, never actually exercised by anything that runs).
 
 ---
 
-## 02 · What this project is
+## 1. Does the code match what the README says?
 
-A simulated agricultural field-scouting robot with **two control modes it can switch between at runtime**, and a research question about how safely that switching holds up. It runs in a 22×24 m Gazebo world laid out as five maize rows of ten plants each, with a rock, a crate, and a post as static obstacles.
+`README.md` was independently re-verified against the current code as part of writing
+this audit (not assumed from an earlier pass). Two points stand out that the README
+itself does not resolve, listed here so they're not lost:
 
-- **Manual** — a human drives it with a keyboard. This is the default on startup, and the only mode active until someone explicitly switches.
-- **Auto** — Nav2 drives it through a boustrophedon (lawnmower) sweep of all five aisles, end to end, then back to the start point.
+| # | Issue | Where | Class |
+|---|---|---|---|
+| 1.1 | README's Requirements list (`ros-jazzy-turtlebot3`, `nav2-bringup`, `slam-toolbox`, `ros-gz`, `joint-state-publisher`) does not mention `tf2_ros`, `nav_msgs`, `numpy`, or `Pillow` — all four are real runtime requirements of scripts in this repo (see §5). | `README.md` "Requirements" | missing dependency (documentation-side) |
+| 1.2 | Everything else checked in the README (topics, message types, spawn pose, field geometry, arbitration behaviour, map/localisation mechanism) matches the code as of this audit. | — | — (confirms, no finding) |
 
-The actual research property under test is narrower than "can it drive the field": **if Nav2 goes silent for more than 0.5 seconds while in auto mode, the robot must stop.** That fallback, and how it behaves across five planned failure scenarios (normal run, obstacle in the row, narrow passage, sensor disturbance, dynamic obstacle) repeated ten times each, is the actual 50-trial experiment the whole rest of the pipeline (Phases 6–10) exists to produce.
+No contradictions were found between README's prose and the current behaviour of
+`arbitration_node.py`, `keyboard_teleop.py`, `simulation.launch.py`, or the field
+geometry in `farm.sdf`.
 
 ---
 
-## 03 · Architecture
+## 2. Stale comments, wrong constants, dead code
 
-One node sits at the center of the whole safety argument: `arbitration_node`. It is the *only* thing in the system allowed to publish `/cmd_vel` — Nav2 and the teleop node each write to their own topic, and arbitration picks one based on `/mode`.
+This is the largest category. Findings are grouped by file.
 
-```mermaid
-flowchart LR
-    MODE["/mode"] --> ARB
-    TELE["keyboard_teleop"] -->|"/cmd_vel_teleop"| ARB["arbitration_node\n(default: MANUAL)"]
-    NAV["Nav2\ncontroller_server + velocity_smoother"] -->|"/cmd_vel_auto"| ARB
-    ARB -->|"/cmd_vel"| GZ["Gazebo\ndiff-drive plugin"]
-    GZ -->|"/scan · /odom · /tf · /joint_states"| NAV
+### `nav2_config/config/nav2_params.yaml`
+
+| Line(s) | Issue | Class |
+|---|---|---|
+| 4–6 | File header comment: *"Two localisation modes are provided... `use_slam:=false` — AMCL localisation against a saved map (default)."* This is no longer true — `navigation.launch.py`'s non-SLAM branch publishes a static `map→odom` transform via `tf2_ros static_transform_publisher`, not AMCL. AMCL is never instantiated anywhere in this repo's current launch files. | stale comment |
+| 14–53 | The entire `amcl:` parameter block (40 lines) configures a node (`nav2_amcl`) that no launch file in this repo instantiates. Dead config — kept current-looking (e.g. `laser_max_range: 3.5` matches the real sensor) but never loaded by anything that runs. | dead code |
+| 302–315 | `global_costmap.obstacle_layer` is fully defined (topic `/scan`, ranges, etc.) but **is not listed in `global_costmap.plugins: [static_layer, inflation_layer]`** (line 298). Nav2's costmap framework only instantiates layers named in `plugins`; an unlisted block is inert. Net effect: the global costmap never incorporates live LIDAR data — only the static map + inflation. | dead code / bug (silent — nothing errors, it just never runs) |
+| 261–283 | `local_costmap` has no `obstacle_layer` at all (only `static_layer` + `inflation_layer`, line 274). Combined with the point above, **neither costmap reacts to live `/scan` data** — obstacle avoidance is entirely dependent on obstacles already being baked into the static map (see §8/generate_farm_map.py). This may be intentional (the world is fully known and static), but it is not stated anywhere, and it directly affects what the `obstacle`-scenario trials in `trial_results/` are actually testing (a scripted mode-switch, not sensor-triggered avoidance). | behavioural gap, undocumented |
+| 386–415 | `lifecycle_manager:` and `lifecycle_manager_slam:` blocks (30 lines) are also dead: `navigation.launch.py`'s `Node(package='nav2_lifecycle_manager', ...)` builds its `node_names` parameter **inline in Python** (`{'node_names': managed}`) and never includes `params_file` in that node's `parameters=[...]` list, so this YAML section is never read. Doubly stale since its `node_names` list (line 392) still includes `amcl`. | dead code |
+
+### `mode_arbitration/mode_arbitration/arbitration_node.py`
+
+| Line(s) | Issue | Class |
+|---|---|---|
+| 6, 7, 10 | Module docstring types the three velocity topics as `(geometry_msgs/Twist)`. The code three lines below imports and uses `TwistStamped` exclusively on all three topics (`/cmd_vel_auto`, `/cmd_vel_teleop`, `/cmd_vel`). No functional issue — the docstring just contradicts its own file. | stale comment |
+
+### `robot_bringup/launch/full_system.launch.py`
+
+| Line(s) | Issue | Class |
+|---|---|---|
+| 7–8 | Docstring: *"3. Nav2 stack (SLAM or AMCL mode)"*. Same stale-AMCL issue as above. | stale comment |
+| 13–14 | Docstring: *"map_file (default '') — path to map YAML used with AMCL"*. The actual default (line 107) is `/home/ssrlserg1/ros2_ws/src/nav2_config/maps/farm_map.yaml`, not `''`, and "used with AMCL" is stale for the same reason as above. | stale comment |
+| 59 vs 106–108 | `map_file = LaunchConfiguration('map_file', default='')` (line 59) declares an inline fallback of `''`, but the file's own `DeclareLaunchArgument('map_file', default_value='/home/ssrlserg1/.../farm_map.yaml', ...)` three lines later (106–108) is what actually takes effect for any normal invocation. The two defaults for the same argument, in the same file, disagree — harmless in practice (`DeclareLaunchArgument` wins), but genuinely misleading to read. | dead code / stale comment |
+
+### `robot_bringup/scripts/scout_mission.py.bak`, `robot_bringup/scripts/slam_coverage_drive.py.bak`
+
+| Issue | Class |
+|---|---|
+| Both `.bak` files are tracked by git (added in commits `636606c` and `c1dfffe`, alongside the rewrites that superseded them) and are meaningfully different, older versions of the live scripts — e.g. `slam_coverage_drive.py.bak` has no "wait for map frame" startup guard that the current file has, and different speed/timeout constants. `.gitignore` does not exclude `*.bak`. These are pure leftover artifacts: version control is already the backup mechanism, so committing hand-made backup copies alongside the real file just leaves two versions of the truth sitting in the tree, one of which nothing points at. | dead code (tracked, unused) |
+
+### `robot_description/package.xml`
+
+| Line | Issue | Class |
+|---|---|---|
+| 11 | Declares `<exec_depend>joint_state_publisher</exec_depend>`, but the only launch file in this package, `display.launch.py` (line 24), instantiates `package='joint_state_publisher_gui'` — a different, separate ROS package. `joint_state_publisher_gui` is not declared anywhere. | bug / missing dependency |
+
+---
+
+## 3. Do launch file arguments match their defaults and descriptions?
+
+| File | Argument | Declared default | Description text | Match? |
+|---|---|---|---|---|
+| `simulation.launch.py` | `use_sim_time` | `'true'` | (none) | consistent |
+| `navigation.launch.py` | `use_sim_time` | `'true'` | "Use /clock from simulation" | consistent |
+| `navigation.launch.py` | `use_slam` | `'false'` | "true=SLAM Toolbox, false=AMCL+map" | **stale** — false no longer means AMCL, it means the static-transform path (see §2) |
+| `navigation.launch.py` | `map_file` | `/home/ssrlserg1/ros2_ws/src/nav2_config/maps/farm_map.yaml` | "Absolute path to map YAML for AMCL mode" | **stale** ("AMCL mode") + the default is a machine-specific absolute path outside the repo (see §4, §8) |
+| `navigation.launch.py` | `nav2` | `'true'` | "false = skip the full Nav2 stack, slam_toolbox only" | consistent |
+| `full_system.launch.py` | `use_sim_time`, `use_slam`, `nav2` | match `navigation.launch.py`'s defaults exactly | — | consistent between the two files |
+| `full_system.launch.py` | `map_file` | same absolute path as `navigation.launch.py`'s default | "Absolute path to map YAML (AMCL mode)" | same staleness as above; at least the two files now **agree** with each other on the actual default value (they did not always — see `PROJECT_STATUS.md`/git history) |
+| `farm_world/gazebo.launch.py` | `gz_args` | `['-r ', world_file]` | "Arguments passed to gz sim" | consistent |
+
+No argument default was found to silently diverge from its own file's description in a
+way that would change behaviour unexpectedly — the "AMCL" wording is stale text, not a
+functional mismatch, and the one duplicate-default oddity (§2) resolves to the correct
+value regardless.
+
+---
+
+## 4. File path consistency (launch files, scripts, configs)
+
+| Path | Used in | Consistent? |
+|---|---|---|
+| `map://` field constants (`WALL_X=11`, `WALL_Y=12`, spawn `(-9.5,-10)`, aisle centerlines `[-6,-2,2,6]`) | `farm_world/worlds/farm.sdf`, `robot_bringup/scripts/slam_coverage_drive.py`, `robot_bringup/scripts/scout_mission.py`, `robot_bringup/scripts/generate_farm_map.py` | **Yes** — every one of these files' hardcoded geometry constants was cross-checked against `farm.sdf`'s actual `<pose>`/`<size>` values directly; all agree. |
+| `map_file` default path | `navigation.launch.py`, `full_system.launch.py` | **Yes**, the two agree with each other. **No**, in a broader sense — it's `/home/ssrlserg1/ros2_ws/src/nav2_config/maps/farm_map.yaml`, a machine-specific absolute path baked into the launch file, pointing *outside* this git repository entirely (a plain, untracked directory at the workspace root, not a colcon package). It will not resolve on any machine where the user's home directory isn't literally `ssrlserg1`. Confirmed this directory is genuinely outside the repo: `git ls-files` returns nothing under it. |
+| `generate_farm_map.py`'s default output directory | `robot_bringup/scripts/generate_farm_map.py:56` | Matches the `map_file` default above exactly (`~/ros2_ws/src/nav2_config/maps`) — consistent with each other, but **not** with the repo's own `nav2_config/maps/` (see §8), so running the generator with no arguments does not populate the package's own tracked location. |
+| TurtleBot3 URDF path | `simulation.launch.py:37`, hardcoded `/opt/ros/jazzy/share/turtlebot3_description/urdf/turtlebot3_waffle.urdf` | Internally consistent (only referenced once), but it is an absolute path into the ROS install tree rather than resolved via `FindPackageShare('turtlebot3_description')`. Works today because `ros-jazzy-turtlebot3` installs to a fixed, predictable location, but it's a hardcoded distro-specific path rather than a portable substitution, unlike every other package reference in this repo (`FindPackageShare(...)` is used everywhere else, e.g. `display.launch.py`, `farm_world/gazebo.launch.py`). |
+| `GZ_SIM_RESOURCE_PATH` | Set in `simulation.launch.py` (both `turtlebot3_gazebo/models` and `virtual_maize_field/models`); **not set** in `farm_world/gazebo.launch.py` | Launching `farm_world/gazebo.launch.py` on its own fails to resolve `model://maize_01`/`maize_02` — confirmed by direct testing in an earlier phase of this project. `simulation.launch.py` (which includes the world differently) works because it sets the variable itself. This is a structural gap between the two launch files, not a typo. |
+
+---
+
+## 5. Does `package.xml` list all actual dependencies?
+
+Checked by cross-referencing every `import`/`from` in every `.py` file and every
+`package='...'` in every launch file against that package's own `<exec_depend>` list.
+
+| Package | Missing dependency | Actually used by | Class |
+|---|---|---|---|
+| `robot_bringup` | `tf2_ros` | `slam_coverage_drive.py:100–101` (`from tf2_ros import Buffer, TransformListener, ...`) **and** `navigation.launch.py:212` (`package='tf2_ros', executable='static_transform_publisher'`) — two independent, unrelated uses, neither declared | missing dependency |
+| `robot_bringup` | `nav_msgs` | `slam_coverage_drive.py:339` (`from nav_msgs.srv import GetMap`, inside `check_full_coverage()`) | missing dependency |
+| `robot_bringup` | `numpy`, `Pillow` (no ROS package name — plain Python libs) | `generate_farm_map.py:16–17` | missing dependency (not expressible as a normal `exec_depend`, but undocumented anywhere in the package) |
+| `robot_bringup` | `matplotlib` (optional) | `analyse_trials.py:19–22`, guarded by a `try/except ImportError` with a helpful message | **not a bug** — the script degrades gracefully and tells the user how to install it; noted for completeness only |
+| `nav2_config` | `nav2_smoother` | `navigation.launch.py:104` (`package='nav2_smoother', executable='smoother_server'`), instantiated in **every** Nav2-enabled configuration (SLAM and non-SLAM alike) | missing dependency |
+| `robot_description` | `joint_state_publisher_gui` (declares `joint_state_publisher` instead — see §2) | `display.launch.py:24` | missing dependency / bug |
+
+`nav2_amcl` remains declared in `nav2_config/package.xml` even though nothing launches
+it any more (see §2) — not "missing," the opposite: a dependency kept around after its
+only user was removed. Harmless, but worth noting alongside the above.
+
+---
+
+## 6. Does `CMakeLists.txt` install everything it should?
+
+| Package | CMakeLists installs | Actually present / needed | Gap |
+|---|---|---|---|
+| `robot_bringup` | `launch/`, `scripts/scout_mission.py` → `scout_mission`, `scripts/slam_coverage_drive.py` → `slam_coverage_drive` | `scripts/` also contains `generate_farm_map.py` and `analyse_trials.py` | Neither is installed as an executable. Both are still runnable directly with `python3 <path>` (both have `#!/usr/bin/env python3` shebangs and are plain scripts, not dependent on the install step for imports), but neither gets a `ros2 run robot_bringup <name>` entry point the way the other two scripts do. Also installs the two `.bak` files' *directory* implicitly if ever referenced — it isn't, they're just untouched by CMake, sitting in `scripts/` doing nothing. |
+| `nav2_config` | `config/`, `maps/` → `share/nav2_config` | `maps/` exists on disk here but is **empty and untracked by git** | **Critical** — see §8. `install(DIRECTORY ...)` requires the source directory to exist; on a fresh clone it won't. Verified directly: archived the current commit (`git archive HEAD`) into a scratch directory and ran `cmake` + `make install` against just this package — configure succeeds, but `make install` fails with `CMake Error ... file INSTALL cannot find ".../nav2_config/maps": No such file or directory.` |
+| `farm_world` | `worlds/`, `launch/` | matches actual directory contents | none |
+| `robot_description` | `urdf/`, `launch/` | matches actual directory contents | none |
+| `mode_arbitration`, `teleop_node` (ament_python, `setup.py`) | single console-script entry point each, matching their one node file | matches | none |
+
+---
+
+## 7. Files not tracked by git that should be
+
+| Finding | Class |
+|---|---|
+| **No `LICENSE` file anywhere in the repository**, despite all six `package.xml` files declaring `<license>Apache-2.0</license>` and `README.md`'s final line stating "Apache-2.0". A real Apache-2.0 grant requires the license text and a NOTICE file to actually apply; right now the license is asserted in five places and present in none. | missing file (administrative, not code) |
+| `nav2_config/maps/farm_map.yaml`/`.pgm` — the file the default `map_file` argument points to — exists only outside the repo (`~/ros2_ws/src/nav2_config/`, a bare directory, not a package) and is not part of this git history at all, tracked or otherwise. Already covered in depth in §4/§8 and in `README.md`. | missing file (by design, per README, but worth restating here since it's the direct answer to this question) |
+
+Conversely — checked for the opposite problem too (files that exist on disk here but
+are `.gitignore`d and maybe shouldn't be): `.gitignore`'s `nav2_config/maps/*.pgm` line
+only excludes the raster image, not the paired `.yaml`, and neither file exists in this
+package's tracked `maps/` directory regardless, so this doesn't currently hide anything.
+`PHASE*.md` is also gitignored, which is why `PHASE0_CURRENT_STATE.md`,
+`PHASE1_RUNTIME_STABILITY.md`, and `PHASE2A_SLAM_READINESS.md` from earlier work in this
+repository don't show up in `git status` — intentional per that gitignore rule, not a
+gap.
+
+---
+
+## 8. Do the trial CSVs in `trial_results/` match the analysis output?
+
+Verified by actually running the analysis rather than reading both sides and comparing
+by eye: `robot_bringup/scripts/analyse_trials.py trial_results <scratch-dir>` was run
+against the real, tracked `trial_results/` directory, writing to a throwaway directory
+outside the repo, then diffed byte-for-byte against the tracked `analysis_output/`
+files.
+
+```
+diff analysis_output/summary_stats.csv       <scratch>/summary_stats.csv        → identical
+diff analysis_output/all_trials_combined.csv <scratch>/all_trials_combined.csv  → identical
 ```
 
-One asymmetry worth knowing: the 0.5 second dead-man's timeout in `arbitration_node` — the safety property this whole FYP is about — **only applies while in AUTO mode**. In MANUAL mode, the node simply re-publishes whatever the teleop node last sent, with no staleness check of its own. That's a reasonable design (a human is presumed present in manual mode), but it means the timeout literally cannot be exercised or measured except by testing AUTO mode specifically — worth being precise about in the report's methodology section.
+**Result: match, exactly.** `analysis_output/summary_stats.csv` and
+`all_trials_combined.csv` are exactly reproducible from the 15 CSVs currently in
+`trial_results/` (5 `baseline_*`, 5 `deadman_*`, 5 `obstacle_*`) via the current version
+of `analyse_trials.py`. All four `.png` charts regenerated without error as well
+(not byte-compared, since chart rendering isn't guaranteed byte-stable across runs, but
+the underlying numbers they're built from are the CSVs just confirmed identical above).
+
+One path-related gap while checking this: `scout_mission.py` writes its `--log` output
+to `~/ros2_ws/<name>.csv` (line 406 — outside both the repo and `trial_results/`), while
+`analyse_trials.py` reads from `trial_results/` by default. Nothing in this repository
+moves a file from the first location to the second — whoever produced the 15 files
+currently in `trial_results/` did that copy step by hand, and no script or README
+instruction documents it.
 
 ---
 
-## 04 · Package inventory
+## Summary — Critical vs. Non-Critical
 
-Six packages, all `0.1.0`, all Apache-2.0. No package has a single automated test.
+**Critical (will break a fresh `git clone` + `colcon build`):**
 
-| Package | Status | Notes |
-|---|---|---|
-| `farm_world` | ✅ Working | SDF world: 50 maize plants across five rows, three static obstacles, boundary walls, fixed top-down/north-up GUI camera (added 2026-08-18). Depends on [`virtual_maize_field`](https://github.com/FieldRobotEvent/virtual_maize_field) for plant meshes — deliberately gitignored, must be cloned separately. Has already gone missing once after a workspace clear. |
-| `robot_description` | ⚠️ Orphaned | A fully worked-out custom differential-drive robot (dimensions, mass, wheels, LIDAR, camera, IMU, all wired to Gazebo Harmonic plugins). Nothing else in the codebase uses it — only an RViz-only `display.launch.py` loads it. |
-| `teleop_node` | ✅ Working | Keyboard teleop, w/a/s/d + arrows, publishes `TwistStamped` to `/cmd_vel_teleop` at 10 Hz. 0.4s dead-man's switch confirmed intentional. |
-| `mode_arbitration` | ✅ Working | `arbitration_node` — confirmed via source read to default to MANUAL and correctly gate `/cmd_vel` on `/mode`. Not started by `simulation.launch.py` alone; only `full_system.launch.py` brings it up. |
-| `nav2_config` | 🔴 Map missing | Thorough, hand-tuned Nav2 parameter set (AMCL, DWB, both costmaps, planner, smoother, behavior server, waypoint follower, SLAM Toolbox) matched to the robot's real 0.35 m/s speed and 3.5 m LIDAR range. `maps/` is currently empty. |
-| `robot_bringup` | 🟡 In progress | Top-level launch orchestration + `scout_mission.py` (Nav2 waypoint-follower boustrophedon) and `slam_coverage_drive.py` (new scripted SLAM driver, unproven in sim). |
+1. `nav2_config/CMakeLists.txt`'s `install(DIRECTORY config maps ...)` (§6) — `maps/` is
+   empty and untracked, so it doesn't exist at all in a fresh clone. `make install`
+   fails on this package specifically, with the exact error reproduced in §6/§8. This
+   already has a documented one-line workaround in `README.md`
+   (`mkdir -p nav2_config/maps` before building), but the underlying repo state is still
+   broken for anyone who clones without having read that note first.
 
----
+**Functional, but does not break the build (silent behavioural gaps — not cosmetic):**
 
-## 05 · Findings
+2. `global_costmap`'s `obstacle_layer` is configured but not wired into `plugins:`, and
+   `local_costmap` has no obstacle layer at all (§2) — Nav2 will run fine, but neither
+   costmap reacts to live `/scan` data; obstacle avoidance is entirely a function of
+   what's already baked into the static map.
+3. Five real missing/wrong dependency declarations (§5): `tf2_ros`, `nav_msgs` in
+   `robot_bringup`; `nav2_smoother` in `nav2_config`; `joint_state_publisher_gui` vs. the
+   wrongly-declared `joint_state_publisher` in `robot_description`. None of these break
+   `colcon build` today (the packages happen to already be present transitively via the
+   wider ROS/Nav2 install), but a minimal `rosdep`-driven install following only this
+   repo's own declared dependencies would not pull them in.
+4. `map_file`'s default is a machine-specific absolute path outside the repository
+   (§4/§8) — works today on this machine, would not resolve for any other user/clone
+   without either overriding `map_file` or recreating that exact external directory.
 
-Eleven findings, most-severe first. **Blocking** stops today's demo path cold as configured. **High** will produce a visible failure or a claim in the report that doesn't match the live system. **Medium** is real but has a known workaround. **Low** is hygiene.
+**Minor (cosmetic / documentation drift, no behavioural effect):**
 
-| Severity | Finding | Where |
-|---|---|---|
-| 🔴 Blocking | No saved map; AMCL launch path's default map path doesn't exist | `nav2_config/maps/` |
-| 🔴 Blocking | Phases 2–11 not started — no localisation test, no autonomous-nav test, no trials, no analysis, no report chapters in this repo | `PROJECT_STATUS.md` |
-| 🟠 High | SLAM coverage script reviewed clean, never run against the sim | `robot_bringup/scripts/slam_coverage_drive.py` |
-| 🟠 High | Two robot models in the repo; only one is actually simulated | `robot_description/` vs `farm_world/worlds/farm.sdf` |
-| 🟠 High | Methodology describes auto-triggered mode switching; implementation is manual-only | `mode_arbitration/mode_arbitration/arbitration_node.py` |
-| 🟡 Medium | Three distinct SLAM failure modes hit so far, each cost a full session | `PROJECT_STATUS.md` |
-| 🟡 Medium | Gazebo camera cache silently reverts the GUI view on every normal close | `~/.gz/sim/8/gui.config` |
-| 🟡 Medium | README stale in 4+ checkable ways vs. the actual running system | `README.md` |
-| ⚪ Low | Dead YAML block — lifecycle manager config that's never actually read | `nav2_config/config/nav2_params.yaml:397-427` |
-| ⚪ Low | Zero automated tests in any package | all packages |
-| ⚪ Low | Required third-party asset repo is gitignored and easy to forget on a fresh clone | `virtual_maize_field` |
-
-### Blocking
-
-**No saved map, and the AMCL path's default won't find one anyway.**
-`nav2_config/maps/` is empty — `farm_map.yaml` was deleted from the working tree and never regenerated; every SLAM-mapping attempt so far has ended in a failure mode before a map got saved. Independent of that, `full_system.launch.py` and `navigation.launch.py` both hardcode the `map_file` default to `/home/adejirea/ros2_ws/src/nav2_config/maps/farm_map.yaml` — a path that has never existed in this workspace, since the package actually lives under `~/ros2_ws/src/ros2-farm-scout-FYP/nav2_config/...`. Running `full_system.launch.py use_slam:=false` today would fail on the missing map before the path bug even mattered.
-
-**Phases 2 through 11 haven't started.**
-Nothing in this repository reflects AMCL testing, autonomous-navigation testing, mode-switch testing, the five scenario definitions, trial-recording infrastructure, the dry run, the 50-trial experiment itself, its analysis, or the report chapters. This audit only covers the code repository — if report chapters or the thesis document live elsewhere, they're outside what was checked here. But nothing in `PROJECT_STATUS.md`'s own phase checklist suggests otherwise either: every box past Phase 0 is still unchecked.
-
-### High
-
-**<a id="script-unproven"></a>`slam_coverage_drive.py` is reviewed clean, not proven.**
-This script is the actual unblock for Phase 1. It went through three rounds of review — a TF-buffer staleness fix, an aisle-transition rewrite, and a one-line heading correction — and the last review traced every turn angle-by-angle and found it internally consistent. But "traced correctly on paper" and "ran clean against a live TF tree with real sensor noise and real physics" are different claims. It has never actually been executed in the simulator. That first live run is the single highest-leverage thing left to do.
-
-**<a id="robot-model"></a>Two robot models; only one is real in the sim.**
-`robot_description/urdf/agricultural_robot.urdf.xacro` is a complete, carefully authored custom robot: 0.60×0.40×0.20 m, 25 kg, differential drive, a 12 m-range LIDAR, a front camera, an IMU — all correctly wired to Gazebo Harmonic plugins. It is **not used anywhere in the actual simulation, navigation, or mission stack.** Every launch file that actually spawns a robot (`simulation.launch.py`, and by extension `farm_world/worlds/farm.sdf`) uses an off-the-shelf TurtleBot3 Waffle instead, with a real 3.5 m LIDAR range. `README.md`'s "Robot specs" table documents the custom robot's numbers as if they were the simulated robot's — they aren't. This was already logged as an open decision in `PROJECT_STATUS.md`'s Phase 5 ("document TB3 Waffle as-simulated, or swap in the custom URDF?") and it's worth closing before it reaches the report, since Section 3.4 (Robot Model) will otherwise describe a robot that was never actually tested.
-
-**<a id="auto-trigger"></a>Auto-trigger switching is described but not implemented.**
-Read in full: `arbitration_node.py` switches modes on exactly one input — a string published to `/mode` by a human or a script. There is no condition anywhere in the codebase (obstacle detected, sensor fault, geofence, battery, anything) that triggers a mode switch on its own. `PROJECT_STATUS.md` Phase 5 already flags this as an open decision against "Methodology 3.7.1 + Recommendation 5.2(ii)" — either a minimal auto-trigger needs to be built, or those sections need rewriting to describe the real manual-only mechanism. Left unresolved, it's the kind of mismatch a supervisor catches in the first five minutes of a live demo.
-
-### Medium
-
-**Three distinct SLAM failure modes, each diagnosed, none fully closed.**
-In order: **(1)** scan-match drift from fast turns producing a doubled/duplicated box in the map; **(2)** a discrete `map→odom` pose-graph jump — traced to a specific timestamp via `nav2_costmap_2d`'s log output, confirmed to sit entirely in the global localisation estimate rather than short-term odometry, and confirmed *not* caused by a slam_toolbox restart; **(3)** incomplete coverage (south/east edges came up short) despite a drive that looked clean and closed visually. A real, separate misconfiguration — `slam_toolbox`/AMCL's laser range set to 12 m against a LIDAR that's actually simulated at 3.5 m — was found and fixed, but it was never confirmed as the cause of either failure; it was a genuine bug worth fixing regardless, not a proven root-cause fix. All three failure modes are documented in detail in `PROJECT_STATUS.md`, which is itself a real asset: this is diagnosed history, not a mystery.
-
-**Gazebo's GUI camera cache overrides the world file, silently, every time.**
-`~/.gz/sim/8/gui.config` — a per-machine cache file outside this repo — silently overrides `farm.sdf`'s fixed top-down camera whenever it exists, and gets rewritten with a stale oblique default on *every normal Gazebo window close*, not just after someone manually orbits the view. The world file's own camera config is correct; the workaround (`rm -f ~/.gz/sim/8/gui.config` before each launch) is documented and confirmed effective, but nothing in the launch chain does it automatically — this was a deliberate scope decision, not an oversight, so it will keep resurfacing.
-
-**README is stale against the running system in several checkable places.**
-Spawn point is documented as `(0, −11)`; the actual spawn point has been `(8, −10)` since 2026-08-15, in both `farm.sdf` and `scout_mission.py`. The "Robot specs" table and the mission-profile ASCII diagram both inherit the same staleness. The LIDAR range listed (12 m) is the pre-fix, wrong value — the actually-simulated TB3 Waffle's range is 3.5 m, which is what the config now correctly says. None of this is subtle; anyone comparing the README to a live launch will notice within the first minute.
-
-### Low
-
-**Dead lifecycle-manager config in `nav2_params.yaml`.**
-The `lifecycle_manager` and `lifecycle_manager_slam` blocks at the bottom of `nav2_params.yaml` (including `bond_timeout: 30.0`) are never actually loaded — `navigation.launch.py` builds that node's parameters entirely inline, including a different, hardcoded `bond_timeout: 0.0`. Harmless today, but a real trap for whoever edits the YAML block later expecting it to change live behaviour.
-
-**No automated tests anywhere.**
-Zero test files across all six packages — not unusual for a simulation-heavy FYP where verification is inherently manual/visual, but worth naming so it's a conscious choice rather than an oversight. Even a handful of launch-file "does it come up clean" smoke tests would have caught some of the config issues above earlier.
-
-**External asset dependency is easy to lose.**
-`virtual_maize_field` — the source of every plant mesh in the world — is deliberately gitignored as a large third-party package and must be manually cloned into `~/ros2_ws/src/`. It has already gone missing once, on the very first Phase 0 attempt, and broke world loading in a way that looked like a code bug. Documented as a re-clone step in both the README and `PROJECT_STATUS.md`, but nothing prevents it recurring on a fresh machine or a grading environment.
-
----
-
-## 06 · Phase roadmap status
-
-As logged in `PROJECT_STATUS.md`, checked against the repo. This is the project's own dependency-ordered plan, not one imposed by this audit.
-
-| # | Phase | Status | Notes |
-|---|---|---|---|
-| 00 | Sanity check | ✅ Done | All 6 items pass — build, sim launch, sensor topics, teleop, mode arbitration, `scout_mission` registration. |
-| 01 | SLAM remap | 🔴 Blocked | 3 manual attempts, 3 distinct failure modes. Scripted driver built and reviewed clean, not yet run. |
-| 02 | AMCL test | ⚪ Not started | Needs a saved map from Phase 1 first. |
-| 03 | Autonomous navigation test | ⚪ Not started | Single goal, then full `scout_mission.py` run. |
-| 04 | Mode-switch test | ⚪ Not started | Manual override mid-navigation, clean resume. |
-| 05 | Quick decisions + fixes | 🟡 Open | Robot-model and auto-trigger decisions still open (see findings). License check, docstring fix, branch cleanup — all cheap, none done. |
-| 06 | Define the 5 scenarios | ⚪ Not started | Concrete, implementable trigger mechanisms — not written yet. |
-| 07 | Trial infrastructure | ⚪ Not started | `record_trial.sh`, `trial_reset.py`, `analyse_trials.py` — none exist yet. |
-| 08 | Dry-run validation | ⚪ Not started | One trial per scenario before committing to all 50. |
-| 09 | Run the experiment | ⚪ Not started | All 50 trials — 5 scenarios × 10 reps. |
-| 10 | Analysis | ⚪ Not started | Tables and charts from the 50-trial dataset. |
-| 11 | Report | ⚪ Not started | All chapters, front matter, and Phase-5 decisions applied to Methodology/Recommendations — not reflected in this repo. |
-
----
-
-## 07 · What's actually solid
-
-Worth stating plainly, because an audit that only lists problems gives a false picture: the parts of this project that are built are built well.
-
-- **The core architecture is correct and defensible.** A single arbitration point for velocity commands, with mode as the only thing that changes which source wins, is exactly the right shape for the safety question this FYP is asking.
-- **The Nav2 tuning is real tuning, not copied defaults.** Velocity limits, costmap inflation, and DWB critic weights all trace back to this robot's actual 0.35 m/s top speed and the field's real dimensions — someone sat with these numbers.
-- **`PROJECT_STATUS.md` is doing exactly the job a status file should.** Every failure mode hit so far is dated, root-caused, and cross-referenced rather than lost to memory. That discipline is precisely what turns "three SLAM sessions went wrong" from a vague bad feeling into three concrete, citable findings — which is a legitimate result to put in front of a supervisor even before Phase 1 formally closes.
-- **Phase 0 wasn't rubber-stamped.** All six checks were independently verified against real topic output, not assumed from the code.
-
----
-
-## 08 · Recommended next steps
-
-Which of these applies depends on the one open question from [§01](#01--the-short-version): is the presentation really today?
-
-> **If the date is firm and unmovable:** Don't try to backfill Phases 2–11 in the time available — that's not recoverable today, and attempting it risks a worse outcome than presenting honestly. Demo what's real and working (Phase 0: sim, teleop, mode arbitration, the architecture itself) and present the SLAM diagnosis as a legitimate result: three independently root-caused failure modes is a real engineering finding, not a gap to hide. Be upfront that Phase 1 is in progress with a reviewed-but-unrun fix in hand.
-
-> **If there's more runway than the file currently says**, three concrete actions, in order:
-> 1. **Run `slam_coverage_drive.py` live** and get one clean saved map. This is the single highest-leverage unblock in the repo right now.
-> 2. **Fix the `map_file` default path** in `full_system.launch.py` / `navigation.launch.py`, and decide the robot-model question (custom URDF vs. TB3-as-simulated) before it touches the README or the report.
-> 3. **Close Phase 2 (AMCL) against that map** before starting Phase 3 — the whole rest of the pipeline depends on localisation actually working first.
-
----
-
-*Audit performed by reading every package manifest, launch file, config, and script in the repository directly — cross-checked against installed build output and `PROJECT_STATUS.md`, not inferred from the README.*
+5. Stale "AMCL" wording in five places across `nav2_params.yaml`'s header,
+   `arbitration_node.py`'s docstring, both launch files' docstrings/argument
+   descriptions, and `nav2_config/package.xml`'s `<description>` (§2, §3) — the actual
+   mechanism is a static `map→odom` transform.
+6. `teleop_node/package.xml`'s `<description>` says "publishes Twist" — code publishes
+   `TwistStamped` (§5-adjacent, caught via §1).
+7. Dead YAML configuration: the entire `amcl:` block and the `lifecycle_manager:`/
+   `lifecycle_manager_slam:` blocks in `nav2_params.yaml` (§2) — neither is loaded by
+   anything that runs.
+8. Two tracked `.bak` files (`scout_mission.py.bak`, `slam_coverage_drive.py.bak`) that
+   duplicate superseded versions of live scripts already preserved in git history (§2).
+9. A duplicate, disagreeing default for `map_file` within `full_system.launch.py`
+   itself (line 59 vs. 106–108) — harmless (the real default wins) but misleading to
+   read (§2).
+10. No `LICENSE` file despite six `package.xml`s and the README asserting Apache-2.0
+    (§7).
+11. `generate_farm_map.py` and `analyse_trials.py` are not installed by
+    `robot_bringup/CMakeLists.txt`, so they have no `ros2 run` entry point unlike the
+    other two scripts in the same directory (§6) — both remain runnable via
+    `python3 <path>`, which is how `README.md` already documents them.
