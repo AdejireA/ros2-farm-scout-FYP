@@ -1,0 +1,4 @@
+scenario,trials,waypoints,succeeded,failed,success_rate_pct,mission_time_mean_s,mission_time_std_s,stop_latency_mean_ms,stop_latency_median_ms,resume_latency_mean_ms,resume_latency_median_ms,deadman_latency_mean_ms,deadman_latency_median_ms
+baseline,5,30,30,0,100.0,147.7,9.9,2.36,1.45,958.9,582.1,0,0
+deadman,5,30,26,4,86.7,166.8,41.5,558.2,63.5,0,0,558.2,63.5
+obstacle,5,30,26,4,86.7,149.9,19.4,3.3,1.5,122.9,89.0,0,0
