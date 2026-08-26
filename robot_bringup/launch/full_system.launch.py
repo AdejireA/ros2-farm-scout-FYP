@@ -56,7 +56,7 @@ from launch_ros.substitutions import FindPackageShare
 def generate_launch_description():
     use_sim_time = LaunchConfiguration('use_sim_time', default='true')
     use_slam     = LaunchConfiguration('use_slam',     default='false')
-    map_file     = LaunchConfiguration('map_file',     default='')
+    map_file     = LaunchConfiguration('map_file')
     nav2         = LaunchConfiguration('nav2',         default='true')
 
     bringup_share = FindPackageShare('robot_bringup')
