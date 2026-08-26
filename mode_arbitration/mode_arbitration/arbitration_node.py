@@ -3,11 +3,11 @@ Mode-switching arbitration node.
 
 Subscriptions:
   /mode          (std_msgs/String)   — "auto" | "manual"
-  /cmd_vel_auto  (geometry_msgs/Twist) — velocity from Nav2 (remapped from /cmd_vel)
-  /cmd_vel_teleop(geometry_msgs/Twist) — velocity from keyboard teleop
+  /cmd_vel_auto  (geometry_msgs/TwistStamped) — velocity from Nav2 (remapped from /cmd_vel)
+  /cmd_vel_teleop(geometry_msgs/TwistStamped) — velocity from keyboard teleop
 
 Publisher:
-  /cmd_vel       (geometry_msgs/Twist) — forwarded to robot / Gazebo bridge
+  /cmd_vel       (geometry_msgs/TwistStamped) — forwarded to robot / Gazebo bridge
 
 The node defaults to MANUAL mode for safety.  Publishing "auto" to /mode
 hands control to Nav2.  If no auto command arrives within AUTO_TIMEOUT seconds
