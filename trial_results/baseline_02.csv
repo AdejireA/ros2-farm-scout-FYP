@@ -1,0 +1,9 @@
+scenario,waypoint,label,x,y,status,duration_s,mode_switches,stop_latency_s,resume_latency_s
+baseline,1,navigate_to_aisle1,-6.0,-10.0,SUCCEEDED,16.6,0,,
+baseline,2,aisle1_mid,-6.0,-2.0,SUCCEEDED,35.18,0,,
+baseline,0,MODE_TEST_1,-6.0,-2.0,MANUAL_OVERRIDE,4.04,2,0.0015,0.0332
+baseline,3,aisle1_top,-6.0,5.0,SUCCEEDED,21.95,0,,
+baseline,4,cross_to_aisle2,-2.0,5.0,SUCCEEDED,16.55,0,,
+baseline,0,MODE_TEST_2,-2.0,5.0,MANUAL_OVERRIDE,4.24,2,0.0011,0.2324
+baseline,5,aisle2_mid,-2.0,-2.0,SUCCEEDED,28.87,0,,
+baseline,6,return_near_spawn,-6.0,-8.0,SUCCEEDED,27.97,0,,
