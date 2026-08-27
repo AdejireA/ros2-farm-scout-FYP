@@ -403,7 +403,10 @@ def main():
     print('=' * 55)
 
     if log_name:
-        csv_path = os.path.expanduser(f'~/ros2_ws/{log_name}.csv')
+        if '/' in log_name:
+            csv_path = f'{log_name}.csv' if not log_name.endswith('.csv') else log_name
+        else:
+            csv_path = os.path.expanduser(f'~/ros2_ws/{log_name}.csv')
         with open(csv_path, 'w', newline='') as f:
             writer = csv.DictWriter(f, fieldnames=[
                 'scenario', 'waypoint', 'label', 'x', 'y', 'status',
@@ -416,7 +419,7 @@ def main():
     mode_pub_node.destroy_node()
     monitor_exec.shutdown()
     monitor.destroy_node()
-    nav.lifecycleShutdown()
+    #nav.lifecycleShutdown()
     rclpy.shutdown()
 
 

@@ -1,0 +1,8 @@
+scenario,waypoint,label,x,y,status,duration_s,mode_switches,stop_latency_s,resume_latency_s
+deadman,1,navigate_to_aisle1,-6.0,-10.0,SUCCEEDED,15.33,0,,
+deadman,2,aisle1_mid,-6.0,-2.0,SUCCEEDED,27.66,0,,
+deadman,0,DEADMAN_TIMEOUT_TEST,-6.0,5.0,DEADMAN_TRIGGERED,6.05,0,0.0381,
+deadman,3,aisle1_top,-6.0,5.0,SUCCEEDED,19.25,0,,
+deadman,4,cross_to_aisle2,-2.0,5.0,SUCCEEDED,16.61,0,,
+deadman,5,aisle2_mid,-2.0,-2.0,SUCCEEDED,23.15,0,,
+deadman,6,return_near_spawn,-6.0,-8.0,SUCCEEDED,30.1,0,,

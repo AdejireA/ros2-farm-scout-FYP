@@ -1,0 +1,8 @@
+scenario,waypoint,label,x,y,status,duration_s,mode_switches,stop_latency_s,resume_latency_s
+obstacle,1,navigate_to_aisle1,-6.0,-10.0,SUCCEEDED,15.4,0,,
+obstacle,2,aisle1_mid,-6.0,-2.0,SUCCEEDED,31.05,0,,
+obstacle,0,OBSTACLE_TAKEOVER_TEST,-6.0,5.0,OBSTACLE_OVERRIDE,9.39,2,0.0019,0.3821
+obstacle,3,aisle1_top,-6.0,5.0,SUCCEEDED,21.95,0,,
+obstacle,4,cross_to_aisle2,-2.0,5.0,SUCCEEDED,19.24,0,,
+obstacle,5,aisle2_mid,-2.0,-2.0,SUCCEEDED,23.15,0,,
+obstacle,6,return_near_spawn,-6.0,-8.0,SUCCEEDED,28.26,0,,
