@@ -158,7 +158,34 @@ For a full batch, `robot_bringup/scripts/run_trials.sh` automates it:
 ./robot_bringup/scripts/run_trials.sh obstacle 1 20
 ```
 
-This script kills and fully relaunches Gazebo, Nav2, and every other node before **every single trial**, not just between scenarios. That's slower, but it means no trial's measurements can be skewed by state left over from the one before it. If you're scripting trials yourself rather than using `run_trials.sh`, do the same, restart the whole system between runs, since a leftover mode setting or a Nav2 stack that's already mid-goal will throw off the latency numbers.
+This script kills and fully relaunches Gazebo, Nav2, and every other node before **every single trial**, not just between scenarios. That's slower, and the repeated teardown/relaunch cycle can trigger TF tree connectivity failures on restart, so it isn't the method used to collect the results in section 9. See the recommended alternative below.
+
+### Manual trial execution (recommended)
+
+Keeping the system running for an entire scenario and looping the mission script in a second terminal avoids the restart-related TF failures described above. Start the system once:
+
+Terminal 1, left running for the whole scenario:
+
+```bash
+ros2 launch robot_bringup full_system.launch.py
+```
+
+Terminal 2, looping trials against that same running system:
+
+```bash
+for i in $(seq -w 1 20); do
+  echo "=== baseline_$i ==="
+  ros2 topic pub /mode std_msgs/msg/String "data: 'auto'" --once
+  python3 ~/ros2_ws/src/ros2-farm-scout-FYP/robot_bringup/scripts/scout_mission.py \
+    --scenario baseline --auto \
+    --log ~/ros2_ws/src/ros2-farm-scout-FYP/trial_results/baseline_$i
+  sleep 3
+done
+```
+
+Swap `baseline` for `deadman` or `obstacle` and adjust the `--log` path to match. Only kill and relaunch Terminal 1 when moving from one scenario to the next (baseline to deadman, deadman to obstacle), not between individual trials within the same scenario.
+
+The 60 evaluation trials in `trial_results/` were collected using this manual method.
 
 CSVs land in `trial_results/`, named `<scenario>_<NN>.csv`.
 
@@ -188,7 +215,7 @@ These figures come directly from `analysis_output/summary_stats.csv`.
 - **Live obstacle avoidance is disabled.** The costmaps' LIDAR-based obstacle layer was turned off during development, because the maize rows were interfering with sensor-based obstacle detection along the aisles. Obstacle avoidance in the current setup relies entirely on the pre-built static map rather than live scan data.
 - **"Succeeded" means goal tolerance, not a verified collision-free path.** Nav2 reports a waypoint as succeeded once the robot is within its configured position and heading tolerance of the goal. It says nothing about what happened along the way.
 - **The map is programmatic, not SLAM-built.** `generate_farm_map.py` draws the occupancy grid from known coordinates rather than from a real mapping run, which is fast and repeatable but means it will only ever be as accurate as the coordinates written into that script.
-- **A shutdown race prints an error on exit.** `rclpy`'s shutdown sequence can trigger a "terminate called" message when `scout_mission.py` exits. It's cosmetic: it happens after the trial's data has already been written, and doesn't affect the logged results.
+- **A shutdown race prints an error on exit.** `rclpy`'s shutdown sequence can trigger a "terminate called" message when `scout_mission.py` exits. It's cosmetic: it happens after the trial's data has already been written, and doesn't affect the logged results. `scout_mission.py` has `nav.lifecycleShutdown()` commented out to allow back-to-back trial execution without restarting the system, which is what makes the manual trial method in section 7 possible.
 
 ## 11. Repository structure
 
